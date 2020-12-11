@@ -65,7 +65,7 @@ private:
     pcl::PointCloud<PointXYZIRT>::Ptr laserCloudIn;
     pcl::PointCloud<OusterPointXYZIRT>::Ptr tmpOusterCloudIn;
     pcl::PointCloud<PointType>::Ptr fullCloud;      // 完整点云
-    pcl::PointCloud<PointType>::Ptr extractedCloud; // 滤除无效点的点云
+    pcl::PointCloud<PointType>::Ptr extractedCloud; // 偏斜矫正后点云
 
     int deskewFlag;
     cv::Mat rangeMat; // 点云投影获得的深度图
@@ -118,7 +118,7 @@ public:
     void resetParameters()
     {
         laserCloudIn->clear();   // 雷达点云信息清空
-        extractedCloud->clear(); // 雷达有效点云清空
+        extractedCloud->clear(); // 偏斜矫正后点云清空
         // reset range matrix for range image projection
         rangeMat = cv::Mat(N_SCAN, Horizon_SCAN, CV_32F, cv::Scalar::all(FLT_MAX)); // 投影深度图
 
@@ -184,7 +184,7 @@ public:
         // 对点云进行偏斜矫正，并投影到深度图中
         projectPointCloud();
 
-        // 确定每根线的起始和结束点索引，并提取出有效点云
+        // 确定每根线的起始和结束点索引，并提取出偏斜矫正后点云及对应的点云信息
         cloudExtraction();
 
         // 发布有效点云和激光点云信息(包括每根线的起始和结束点索引、点深度、列索引)
@@ -607,9 +607,10 @@ public:
     {
         int count = 0;
         // extract segmented cloud for lidar odometry
-        // 确定每根线的起始和结束点索引，并提取出有效点云
+        // 确定每根线的起始和结束点索引，并提取出偏斜矫正后点云
         for (int i = 0; i < N_SCAN; ++i)
         {
+            // 每根线上点云信息的起始索引未从起始点开始，原因是该部分提取出来的点云是用于特征提取的，起始点附近的点都无法有效计算曲率
             cloudInfo.startRingIndex[i] = count - 1 + 5;
 
             for (int j = 0; j < Horizon_SCAN; ++j)
