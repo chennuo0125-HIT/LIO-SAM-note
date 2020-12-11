@@ -94,7 +94,7 @@ public:
 
     // Lidar Sensor Configuration
     SensorType sensor;
-    int N_SCAN;
+    int N_SCAN; // 雷达线数
     int Horizon_SCAN;
     int downsampleRate;
     float lidarMinRange;
@@ -316,6 +316,7 @@ void imuAccel2rosAccel(sensor_msgs::Imu *thisImuMsg, T *acc_x, T *acc_y, T *acc_
     *acc_z = thisImuMsg->linear_acceleration.z;
 }
 
+// 将用四元素表示的imu姿态信息转换成欧拉角表示
 template <typename T>
 void imuRPY2rosRPY(sensor_msgs::Imu *thisImuMsg, T *rosRoll, T *rosPitch, T *rosYaw)
 {

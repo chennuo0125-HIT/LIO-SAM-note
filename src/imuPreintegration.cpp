@@ -29,8 +29,8 @@ public:
     ros::Subscriber subImuOdometry;   // 通过imu积分估计的雷达里程计信息订阅器
     ros::Subscriber subLaserOdometry; // 最终优化后的里程计信息订阅器
 
-    ros::Publisher pubImuOdometry; // 发布imu预积分结果
-    ros::Publisher pubImuPath;
+    ros::Publisher pubImuOdometry; // imu里程计信息发布器
+    ros::Publisher pubImuPath;     // imu路径发布器
 
     Eigen::Affine3f lidarOdomAffine;
     Eigen::Affine3f imuOdomAffineFront;
@@ -331,7 +331,7 @@ public:
         }
 
         // reset graph for speed
-        // 当isam2规模太大时，重置优化器和因子图
+        // 当isam2规模太大时，进行边缘化，重置优化器和因子图
         if (key == 100)
         {
             // get updated noise before reset
