@@ -44,7 +44,7 @@ public:
 
     TransformFusion()
     {
-        // 如果雷达坐标系和基座标系不一致，则雷达坐标系相对于基座标系的转换关系
+        // 如果雷达坐标系和基座标系不一致，则获取雷达坐标系相对于基座标系的转换关系
         if (lidarFrame != baselinkFrame)
         {
             try
@@ -61,8 +61,9 @@ public:
         subLaserOdometry = nh.subscribe<nav_msgs::Odometry>("lio_sam/mapping/odometry", 5, &TransformFusion::lidarOdometryHandler, this, ros::TransportHints().tcpNoDelay());
         subImuOdometry = nh.subscribe<nav_msgs::Odometry>(odomTopic + "_incremental", 2000, &TransformFusion::imuOdometryHandler, this, ros::TransportHints().tcpNoDelay());
 
-        pubImuOdometry = nh.advertise<nav_msgs::Odometry>(odomTopic, 2000);
-        pubImuPath = nh.advertise<nav_msgs::Path>("lio_sam/imu/path", 1);
+        // TransformFusion这个类产生的数据没有被其它节点使用，只是单纯的为了rviz显示用，所以这个类可以去掉，不影响最后的建图结果
+        pubImuOdometry = nh.advertise<nav_msgs::Odometry>(odomTopic, 2000); // 该话题没有被任何其它节点利用
+        pubImuPath = nh.advertise<nav_msgs::Path>("lio_sam/imu/path", 1);   // 该话题只为显示用
     }
 
     Eigen::Affine3f odom2affine(nav_msgs::Odometry odom)
@@ -126,7 +127,7 @@ public:
         pubImuOdometry.publish(laserOdometry);
 
         // publish tf
-        // 发布对应的tf信息
+        // 发布最新的odom与base_link之间的转换关系，为了rviz显示imu里程计路径用
         static tf::TransformBroadcaster tfOdom2BaseLink;
         tf::Transform tCur;
         tf::poseMsgToTF(laserOdometry.pose.pose, tCur);
@@ -422,7 +423,7 @@ public:
         prevState_ = gtsam::NavState(prevPose_, prevVel_);
         prevBias_ = result.at<gtsam::imuBias::ConstantBias>(B(key));
         // Reset the optimization preintegration object.
-        // 重置优化预积分对象
+        // 利用优化后的imu偏置信息重置imu预积分对象
         imuIntegratorOpt_->resetIntegrationAndSetBias(prevBias_);
         // check optimization
         // 对优化结果进行失败检测: 当速度和偏置太大时，则认为优化失败
@@ -446,13 +447,14 @@ public:
             imuQueImu.pop_front();
         }
         // repropogate
+        // 重新进行预积分，从矫正时间开始
         if (!imuQueImu.empty())
         {
             // reset bias use the newly optimized bias
-            // 将优化有的偏置信息更新到预积分器内
+            // 将优化后的imu偏置信息更新到预积分器内
             imuIntegratorImu_->resetIntegrationAndSetBias(prevBiasOdom);
             // integrate imu message from the beginning of this optimization
-            // 从矫正时间开始，对imu数据进行预积分
+            // 从矫正时间开始，对imu数据重新进行预积分
             for (int i = 0; i < (int)imuQueImu.size(); ++i)
             {
                 sensor_msgs::Imu *thisImu = &imuQueImu[i];
@@ -513,7 +515,7 @@ public:
                                                 gtsam::Vector3(thisImu.angular_velocity.x, thisImu.angular_velocity.y, thisImu.angular_velocity.z), dt);
 
         // predict odometry
-        // 利用上一时刻的imu状态信息PVQ和偏置信息，更新当前时刻imu状态信息PVQ
+        // 利用上一时刻的imu里程计状态信息PVQ和偏置信息，预积分当前时刻imu里程计状态信息PVQ
         gtsam::NavState currentState = imuIntegratorImu_->predict(prevStateOdom, prevBiasOdom);
 
         // publish odometry
