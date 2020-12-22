@@ -55,7 +55,7 @@ public:
     Eigen::MatrixXd poseCovariance;
 
     ros::Publisher pubLaserCloudSurround;       // 地图发布器
-    ros::Publisher pubLaserOdometryGlobal;      // 优化后的雷达里程计信息发布器(预积分节点需要，矫正预积分结果)
+    ros::Publisher pubLaserOdometryGlobal;      // 优化后的雷达里程计信息发布器
     ros::Publisher pubLaserOdometryIncremental; //　优化后的雷达里程计增量信息发布器(预积分节点需要，矫正加速度计和陀螺仪偏置)
     ros::Publisher pubKeyPoses;                 // 关键帧位姿发布器
     ros::Publisher pubPath;                     // 关键帧路径发布器
@@ -152,7 +152,7 @@ public:
 
         pubKeyPoses = nh.advertise<sensor_msgs::PointCloud2>("lio_sam/mapping/trajectory", 1);
         pubLaserCloudSurround = nh.advertise<sensor_msgs::PointCloud2>("lio_sam/mapping/map_global", 1);
-        pubLaserOdometryGlobal = nh.advertise<nav_msgs::Odometry>("lio_sam/mapping/odometry", 1);
+        pubLaserOdometryGlobal = nh.advertise<nav_msgs::Odometry>("lio_sam/mapping/odometry", 1); // 发布最新关键帧位姿
         pubLaserOdometryIncremental = nh.advertise<nav_msgs::Odometry>("lio_sam/mapping/odometry_incremental", 1);
         pubPath = nh.advertise<nav_msgs::Path>("lio_sam/mapping/path", 1);
 
@@ -240,7 +240,7 @@ public:
         {
             timeLastProcessing = timeLaserInfoCur;
 
-            // 更新当前点云帧对应的位姿的初始估计
+            // 更新当前数据帧对应的位姿的初始估计
             updateInitialGuess();
 
             // 提取附近关键帧的角点和平面点点云
@@ -734,12 +734,12 @@ public:
     void updateInitialGuess()
     {
         // save current transformation before any processing
-        // 进行处理前保存当前的转换
+        // 进行处理前保存上一帧的转换(也即上一关键帧的位姿)
         incrementalOdometryAffineFront = trans2Affine3f(transformTobeMapped);
 
         static Eigen::Affine3f lastImuTransformation;
         // initialization
-        // 如果还没有关键帧位姿，则利用imu信息初始化当前的转换和上次更新时的imu转换
+        // 如果还没有关键帧位置信息，则利用imu信息初始化当前的数据帧的位姿和上次更新时的imu转换
         if (cloudKeyPoses3D->points.empty())
         {
             transformTobeMapped[0] = cloudInfo.imuRollInit;
@@ -759,7 +759,7 @@ public:
         static Eigen::Affine3f lastImuPreTransformation;
         if (cloudInfo.odomAvailable == true)
         {
-            // 获得当前点云帧对应的imu里程计位姿
+            // 获得当前数据帧对应的imu里程计位姿
             Eigen::Affine3f transBack = pcl::getTransformation(cloudInfo.initialGuessX, cloudInfo.initialGuessY, cloudInfo.initialGuessZ,
                                                                cloudInfo.initialGuessRoll, cloudInfo.initialGuessPitch, cloudInfo.initialGuessYaw);
             if (lastImuPreTransAvailable == false)
@@ -769,15 +769,15 @@ public:
             }
             else
             {
-                // 获得上个点云帧对应的imu里程计位姿相对与当前点云帧对应的imu里程计位姿的增量
+                // 获得上个数据帧对应的imu里程计位姿相对与当前数据帧对应的imu里程计位姿的增量
                 Eigen::Affine3f transIncre = lastImuPreTransformation.inverse() * transBack;
-                // 获得估计后的当前点云帧对应的位姿
+                // 获得估计后的当前数据帧对应的位姿
                 Eigen::Affine3f transTobe = trans2Affine3f(transformTobeMapped);
                 Eigen::Affine3f transFinal = transTobe * transIncre;
                 pcl::getTranslationAndEulerAngles(transFinal, transformTobeMapped[3], transformTobeMapped[4], transformTobeMapped[5],
                                                   transformTobeMapped[0], transformTobeMapped[1], transformTobeMapped[2]);
 
-                // 更新last变量
+                // 更新上个数据帧对应的imu里程计位姿信息
                 lastImuPreTransformation = transBack;
 
                 lastImuTransformation = pcl::getTransformation(0, 0, 0, cloudInfo.imuRollInit, cloudInfo.imuPitchInit, cloudInfo.imuYawInit); // save imu before return;
@@ -961,6 +961,7 @@ public:
 
             if (pointSearchSqDis[4] < 1.0)
             {
+                // 查找局部地图中最近的5个点，并计算5点的中心坐标
                 float cx = 0, cy = 0, cz = 0;
                 for (int j = 0; j < 5; j++)
                 {
@@ -972,6 +973,7 @@ public:
                 cy /= 5;
                 cz /= 5;
 
+                // 计算5个点相对于中心点分布的协方差
                 float a11 = 0, a12 = 0, a13 = 0, a22 = 0, a23 = 0, a33 = 0;
                 for (int j = 0; j < 5; j++)
                 {
@@ -993,6 +995,7 @@ public:
                 a23 /= 5;
                 a33 /= 5;
 
+                // 协方差矩阵
                 matA1.at<float>(0, 0) = a11;
                 matA1.at<float>(0, 1) = a12;
                 matA1.at<float>(0, 2) = a13;
@@ -1003,14 +1006,18 @@ public:
                 matA1.at<float>(2, 1) = a23;
                 matA1.at<float>(2, 2) = a33;
 
+                // 计算协方差矩阵的特征值和特征向量
                 cv::eigen(matA1, matD1, matV1);
 
+                // 由于cv::eigen获得的特征值是按从大到小的顺序排列的，因此，此处表示的是存在一个特征值明显大于其它特征值
+                // 最大特征值matD1.at<float>(0,0)对应的特征向量matV1.at<float>(0)为特征直线的方向
                 if (matD1.at<float>(0, 0) > 3 * matD1.at<float>(0, 1))
                 {
-
+                    // 当前待匹配边特征点
                     float x0 = pointSel.x;
                     float y0 = pointSel.y;
                     float z0 = pointSel.z;
+                    // 局部地图中对应的特征直线上的两点坐标
                     float x1 = cx + 0.1 * matV1.at<float>(0, 0);
                     float y1 = cy + 0.1 * matV1.at<float>(0, 1);
                     float z1 = cz + 0.1 * matV1.at<float>(0, 2);
@@ -1018,20 +1025,21 @@ public:
                     float y2 = cy - 0.1 * matV1.at<float>(0, 1);
                     float z2 = cz - 0.1 * matV1.at<float>(0, 2);
 
+                    // 对应LOAM论文中公式(2)的上半部分
                     float a012 = sqrt(((x0 - x1) * (y0 - y2) - (x0 - x2) * (y0 - y1)) * ((x0 - x1) * (y0 - y2) - (x0 - x2) * (y0 - y1)) + ((x0 - x1) * (z0 - z2) - (x0 - x2) * (z0 - z1)) * ((x0 - x1) * (z0 - z2) - (x0 - x2) * (z0 - z1)) + ((y0 - y1) * (z0 - z2) - (y0 - y2) * (z0 - z1)) * ((y0 - y1) * (z0 - z2) - (y0 - y2) * (z0 - z1)));
-
+                    // 对应LOAM论文中公式(2)的下半部分
                     float l12 = sqrt((x1 - x2) * (x1 - x2) + (y1 - y2) * (y1 - y2) + (z1 - z2) * (z1 - z2));
-
+                    // 公式(2)对x0偏导数
                     float la = ((y1 - y2) * ((x0 - x1) * (y0 - y2) - (x0 - x2) * (y0 - y1)) + (z1 - z2) * ((x0 - x1) * (z0 - z2) - (x0 - x2) * (z0 - z1))) / a012 / l12;
-
+                    // 公式(2)对y0偏导数
                     float lb = -((x1 - x2) * ((x0 - x1) * (y0 - y2) - (x0 - x2) * (y0 - y1)) - (z1 - z2) * ((y0 - y1) * (z0 - z2) - (y0 - y2) * (z0 - z1))) / a012 / l12;
-
+                    // 公式(2)对z0偏导数
                     float lc = -((x1 - x2) * ((x0 - x1) * (z0 - z2) - (x0 - x2) * (z0 - z1)) + (y1 - y2) * ((y0 - y1) * (z0 - z2) - (y0 - y2) * (z0 - z1))) / a012 / l12;
-
+                    // 对应LOAM论文中公式(2)的结果
                     float ld2 = a012 / l12;
-
+                    // 计算权重(距离越近，权重越大)
                     float s = 1 - 0.9 * fabs(ld2);
-
+                    // coeff保存带权重的偏导数
                     coeff.x = s * la;
                     coeff.y = s * lb;
                     coeff.z = s * lc;
@@ -1073,6 +1081,7 @@ public:
 
             if (pointSearchSqDis[4] < 1.0)
             {
+                // 利用5个平面点构建超定方程，并利用qr分解计算拟合的平面系数
                 for (int j = 0; j < 5; j++)
                 {
                     matA0(j, 0) = laserCloudSurfFromMapDS->points[pointSearchInd[j]].x;
@@ -1082,11 +1091,13 @@ public:
 
                 matX0 = matA0.colPivHouseholderQr().solve(matB0);
 
+                // 平面系数ax+by+cz+1=0
                 float pa = matX0(0, 0);
                 float pb = matX0(1, 0);
                 float pc = matX0(2, 0);
                 float pd = 1;
 
+                // 对平面系数进行归一化
                 float ps = sqrt(pa * pa + pb * pb + pc * pc);
                 pa /= ps;
                 pb /= ps;
@@ -1107,8 +1118,10 @@ public:
 
                 if (planeValid)
                 {
+                    // 计算当前特征点到目标平面特征的距离
                     float pd2 = pa * pointSel.x + pb * pointSel.y + pc * pointSel.z + pd;
 
+                    // 计算权重
                     float s = 1 - 0.9 * fabs(pd2) / sqrt(sqrt(pointSel.x * pointSel.x + pointSel.y * pointSel.y + pointSel.z * pointSel.z));
 
                     coeff.x = s * pa;
@@ -1344,6 +1357,7 @@ public:
         transformTobeMapped[1] = constraintTransformation(transformTobeMapped[1], rotation_tollerance);
         transformTobeMapped[5] = constraintTransformation(transformTobeMapped[5], z_tollerance);
 
+        // 保存当前关键帧的转换(也即当前帧关键帧位姿)
         incrementalOdometryAffineBack = trans2Affine3f(transformTobeMapped);
     }
 
@@ -1509,7 +1523,7 @@ public:
             return;
 
         // odom factor
-        // 添加雷达里程计因子到因子图中
+        // 添加优化后的雷达里程计因子到因子图中
         addOdomFactor();
 
         // gps factor
@@ -1586,6 +1600,7 @@ public:
         transformTobeMapped[5] = latestEstimate.translation().z();
 
         // save all the received edge and surf points
+        // 保存所有接收到的边和面特征点
         pcl::PointCloud<PointType>::Ptr thisCornerKeyFrame(new pcl::PointCloud<PointType>());
         pcl::PointCloud<PointType>::Ptr thisSurfKeyFrame(new pcl::PointCloud<PointType>());
         pcl::copyPointCloud(*laserCloudCornerLastDS, *thisCornerKeyFrame);
@@ -1655,6 +1670,7 @@ public:
     void publishOdometry()
     {
         // Publish odometry for ROS (global)
+        // 发布最新关键帧位姿
         nav_msgs::Odometry laserOdometryROS;
         laserOdometryROS.header.stamp = timeLaserInfoStamp;
         laserOdometryROS.header.frame_id = odometryFrame;
@@ -1684,8 +1700,8 @@ public:
         }
         else
         {
-            Eigen::Affine3f affineIncre = incrementalOdometryAffineFront.inverse() * incrementalOdometryAffineBack;
-            increOdomAffine = increOdomAffine * affineIncre;
+            Eigen::Affine3f affineIncre = incrementalOdometryAffineFront.inverse() * incrementalOdometryAffineBack; // 计算上一关键帧和当前关键帧之间的位姿增量
+            increOdomAffine = increOdomAffine * affineIncre;                                                        // 计算当前增量式里程计的位姿
             float x, y, z, roll, pitch, yaw;
             pcl::getTranslationAndEulerAngles(increOdomAffine, x, y, z, roll, pitch, yaw);
             if (cloudInfo.imuAvailable == true)
@@ -1710,6 +1726,7 @@ public:
                     pitch = pitchMid;
                 }
             }
+            // 发布当前增量式雷达里程计的位姿
             laserOdomIncremental.header.stamp = timeLaserInfoStamp;
             laserOdomIncremental.header.frame_id = odometryFrame;
             laserOdomIncremental.child_frame_id = "odom_mapping";
