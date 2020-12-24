@@ -939,7 +939,7 @@ public:
     {
         transPointAssociateToMap = trans2Affine3f(transformTobeMapped);
     }
-
+    // 此部分要讲解的内容偏理论，直接参考博客https://blog.csdn.net/weixin_37835423/article/details/111587379
     void cornerOptimization()
     {
         updatePointAssociateToMap();
@@ -1055,7 +1055,7 @@ public:
             }
         }
     }
-
+    // 此部分要讲解的内容偏理论，直接参考博客https://blog.csdn.net/weixin_37835423/article/details/111587379
     void surfOptimization()
     {
         updatePointAssociateToMap();
@@ -1165,6 +1165,7 @@ public:
         std::fill(laserCloudOriSurfFlag.begin(), laserCloudOriSurfFlag.end(), false);
     }
 
+    // 此部分要讲解的内容偏理论，直接参考博客https://blog.csdn.net/weixin_37835423/article/details/111587379
     bool LMOptimization(int iterCount)
     {
         // This optimization is from the original loam_velodyne by Ji Zhang, need to cope with coordinate transformation
@@ -1292,6 +1293,7 @@ public:
         return false; // keep optimizing
     }
 
+    // 此部分要讲解的内容偏理论，直接参考博客https://blog.csdn.net/weixin_37835423/article/details/111587379
     void scan2MapOptimization()
     {
         // 无关键帧存在时，直接跳过
